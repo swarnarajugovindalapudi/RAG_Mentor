@@ -1,40 +1,35 @@
 import os
 from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEndpoint
-from langchain_core.prompts import PromptTemplate
+from google import genai
+from google.genai import types
 
 load_dotenv()
 
-DEFAULT_HF_REPO_ID = "HuggingFaceH4/zephyr-7b-beta"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
 FALLBACK_OPTIONS = [
-    "Ask questions directly related to the content of your uploaded PDF.",
-    "Upload a more relevant PDF document that covers this topic.",
+    "Upload a relevant PDF that covers this topic.",
+    "Ask something from your document related to the uploaded PDF.",
     "Try one of the auto-generated relevant questions suggested for your document.",
 ]
 
 
-def _get_llm(repo_id=DEFAULT_HF_REPO_ID, temperature=0.2, max_new_tokens=512):
-    """Initialize Hugging Face Zephyr-7b-beta endpoint if token is available."""
-    hf_token = (
-        os.getenv("HUGGINGFACEHUB_API_TOKEN")
-        or os.getenv("HF_TOKEN")
+def _get_gemini_client():
+    """Initialize Google GenAI client using GEMINI_API_KEY or GOOGLE_API_KEY from .env."""
+    api_key = (
+        os.getenv("GEMINI_API_KEY")
+        or os.getenv("GOOGLE_API_KEY")
         or ""
     ).strip()
 
-    if not hf_token:
+    if not api_key:
         return None
 
-    return HuggingFaceEndpoint(
-        repo_id=repo_id,
-        huggingfacehub_api_token=hf_token,
-        temperature=temperature,
-        max_new_tokens=max_new_tokens,
-    )
+    return genai.Client(api_key=api_key)
 
 
 def _is_answer_missing_from_context(answer_text):
-    """Detect if the model indicates the information is not found in the context."""
+    """Detect if the model response indicates missing context."""
     cleaned = (answer_text or "").strip().lower()
     if not cleaned:
         return True
@@ -42,6 +37,7 @@ def _is_answer_missing_from_context(answer_text):
         "not mentioned in the provided document",
         "not found in the provided context",
         "not available in the context",
+        "not covered in your uploaded document",
         "i don't know",
         "i do not know",
         "cannot find",
@@ -56,11 +52,11 @@ def generate_rag_answer(
     context_text,
     page_numbers=None,
     suggested_questions=None,
-    repo_id=DEFAULT_HF_REPO_ID,
+    model_name=DEFAULT_GEMINI_MODEL,
 ):
     """
-    Generate an answer from retrieved PDF context using Zephyr-7b-beta.
-    Returns a structured dictionary with answer, page_numbers, is_fallback, and options.
+    Generate an answer from retrieved PDF context using Gemini.
+    Returns a dict with answer, page_numbers, is_fallback, options, and suggested_questions.
     """
     pages = sorted(set(page_numbers or []))
     starter_questions = suggested_questions or []
@@ -78,8 +74,8 @@ def generate_rag_answer(
     if not (context_text or "").strip():
         return {
             "answer": (
-                "I couldn't find information for your question in the current document context. "
-                "Here are a few ways you can continue:"
+                "No relevant information found in your uploaded document. "
+                "What would you like to do?"
             ),
             "page_numbers": [],
             "is_fallback": True,
@@ -87,35 +83,29 @@ def generate_rag_answer(
             "suggested_questions": starter_questions,
         }
 
-    prompt_template = PromptTemplate.from_template(
-        """You are RAGMentor, a helpful study and research assistant.
-Answer the user's question strictly using the provided document context.
-If the answer is not clearly present in the provided context, reply exactly with:
-NOT_FOUND_IN_DOCUMENT
-
-Context:
-{context}
-
-Question:
-{question}
-
-Answer:"""
+    prompt = (
+        "You are RAGMentor, a precise document study assistant.\n"
+        "Answer the user's question strictly using the provided document context.\n"
+        "If the answer cannot be found or inferred reliably from the provided context, "
+        "reply strictly with: NOT_FOUND_IN_DOCUMENT\n\n"
+        f"Document Context:\n{context_text}\n\n"
+        f"Question:\n{question}\n\n"
+        "Answer:"
     )
 
-    llm = _get_llm(repo_id=repo_id)
+    client = _get_gemini_client()
 
-    if llm is not None:
+    if client is not None:
         try:
-            formatted_prompt = prompt_template.format(
-                context=context_text,
-                question=question,
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=600,
+                ),
             )
-            raw_response = llm.invoke(formatted_prompt)
-            answer_text = (
-                raw_response.content
-                if hasattr(raw_response, "content")
-                else str(raw_response)
-            ).strip()
+            answer_text = (response.text or "").strip()
 
             if (
                 not answer_text
@@ -124,8 +114,8 @@ Answer:"""
             ):
                 return {
                     "answer": (
-                        "This topic does not appear to be covered in the uploaded PDF. "
-                        "Instead of stopping here, you can try any of these options:"
+                        "No relevant information found in your uploaded document for this question. "
+                        "What would you like to do?"
                     ),
                     "page_numbers": [],
                     "is_fallback": True,
@@ -145,7 +135,7 @@ Answer:"""
             excerpt = context_text[:600].strip()
             return {
                 "answer": (
-                    f"LLM API notice ({exc}). Based on the closest matching section in your PDF:\n\n"
+                    f"Gemini API notice ({exc}). Closest matching section from your PDF:\n\n"
                     f"{excerpt}..."
                 ),
                 "page_numbers": pages,
@@ -157,8 +147,8 @@ Answer:"""
     excerpt = context_text[:600].strip()
     return {
         "answer": (
-            "Hugging Face API token isn't configured in `.env` yet, so here is the most relevant "
-            f"excerpt retrieved from your PDF:\n\n{excerpt}..."
+            "GEMINI_API_KEY wasn't found in `.env`. Showing the closest matching section from your PDF:\n\n"
+            f"{excerpt}..."
         ),
         "page_numbers": pages,
         "is_fallback": False,

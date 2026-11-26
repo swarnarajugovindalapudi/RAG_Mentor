@@ -16,12 +16,7 @@ def extract_pdf_pages(pdf_path):
         cleaned_text = re.sub(r"[ \t]+", " ", raw_text)
         cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
         if cleaned_text:
-            pages.append(
-                {
-                    "page_number": page_num,
-                    "text": cleaned_text,
-                }
-            )
+            pages.append({"page_number": page_num, "text": cleaned_text})
     return pages
 
 
@@ -40,15 +35,13 @@ def chunk_pages(pages, chunk_size=1000, chunk_overlap=150):
         for chunk_idx, text_piece in enumerate(splits):
             clean_piece = text_piece.strip()
             if clean_piece:
-                chunks.append(
-                    {
-                        "text": clean_piece,
-                        "metadata": {
-                            "page_number": page_num,
-                            "chunk_index": chunk_idx,
-                        },
-                    }
-                )
+                chunks.append({
+                    "text": clean_piece,
+                    "metadata": {
+                        "page_number": page_num,
+                        "chunk_index": chunk_idx,
+                    },
+                })
     return chunks
 
 
@@ -57,9 +50,9 @@ def generate_quick_summary(pages, max_chars=2200, max_sentences=5):
     if not pages:
         return "No readable text found in the uploaded PDF."
 
-    combined_parts = []
-    for page in pages:
-        combined_parts.append(f"[Page {page['page_number']}] {page['text']}")
+    combined_parts = [
+        f"[Page {page['page_number']}] {page['text']}" for page in pages
+    ]
     combined_text = "\n\n".join(combined_parts).strip()
 
     if not combined_text:
@@ -70,9 +63,9 @@ def generate_quick_summary(pages, max_chars=2200, max_sentences=5):
 
     selected = []
     for sent in raw_sentences:
-        s = sent.strip()
-        if len(s) >= 20:
-            selected.append(s)
+        sentence = sent.strip()
+        if len(sentence) >= 20:
+            selected.append(sentence)
         if len(selected) >= max_sentences:
             break
 
@@ -112,18 +105,18 @@ def generate_relevant_questions(pages, max_questions=4):
         "Are there any key steps, rules, or examples in this PDF?",
     ]
 
-    for dq in default_questions:
+    for question in default_questions:
         if len(questions) >= max_questions:
             break
-        if dq.lower() not in seen:
-            seen.add(dq.lower())
-            questions.append(dq)
+        if question.lower() not in seen:
+            seen.add(question.lower())
+            questions.append(question)
 
     return questions[:max_questions]
 
 
 def ingest_pdf(pdf_path, chunk_size=1000, chunk_overlap=150):
-    """Process a PDF and return total pages, chunks with page numbers, summary, and starter questions."""
+    """Process a PDF and return total pages, chunks, summary, and starter questions."""
     pages = extract_pdf_pages(pdf_path)
     chunks = chunk_pages(pages, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     summary = generate_quick_summary(pages)

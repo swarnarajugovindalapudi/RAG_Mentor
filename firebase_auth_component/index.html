@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>RAGMentor Firebase Login</title>
+
+
+
+  <style>
+
+    * { box-sizing: border-box; }
+
+
+
+    html, body { width: 100%; min-width: 0; }
+    body {
+      margin: 0;
+      padding: 18px 10px;
+      font-family: Arial, sans-serif;
+      color: #172033;
+      background: transparent;
+    }
+
+
+
+    .card {
+      width: 100%;
+      max-width: 490px;
+      margin: 0 auto;
+      padding: 26px;
+      background: #ffffff;
+      border: 1px solid rgba(226,232,240,.9);
+      border-radius: 18px;
+      box-shadow: 0 12px 35px rgba(0,0,0,.18);
+    }
+
+
+
+    h2 { text-align: center; margin: 0 0 8px; }
+
+    .sub { text-align: center; color: #64748b; font-size: 14px; }
+
+
+
+    input, button {
+
+      width: 100%;
+
+      min-height: 46px;
+
+      border-radius: 9px;
+
+      font-size: 15px;
+
+    }
+
+
+
+    input {
+
+      padding: 10px;
+
+      border: 1px solid #cbd5e1;
+
+      margin-top: 7px;
+
+    }
+
+
+
+    button {
+
+      border: 0;
+
+      padding: 10px;
+
+      cursor: pointer;
+
+      font-weight: 600;
+
+      margin-top: 12px;
+
+    }
+
+
+
+    button:disabled { opacity: .5; cursor: wait; }
+
+
+
+    .google { background: white; border: 1px solid #cbd5e1; }
+
+
+
+
+
+
+    label { display: block; margin-top: 15px; font-weight: 600; font-size: 13px; }
+
+
+
+    .divider { text-align: center; margin: 18px; color: #94a3b8; }
+
+
+
+    .status {
+
+      min-height: 22px;
+
+      margin-top: 12px;
+
+      text-align: center;
+
+      font-size: 13px;
+
+      overflow-wrap: anywhere;
+
+    }
+
+
+
+    .error { color: #b91c1c; }
+
+    .success { color: #047857; }
+
+    .hidden { display: none !important; }
+
+
+
+
+
+
+    .email-form { display: none; margin-top: 12px; }
+    .email-form.visible { display: block; }
+    .email-btn { background: #f8fafc; color: #174ea6; border: 1px solid #cbd5e1; }
+    .email-send { background: #155eef; color: white; }
+    .email-verify { background: #0f766e; color: white; }
+    .divider { text-align: center; margin: 17px 0; color: #94a3b8; font-size: 13px; }
+
+    .small {
+
+      text-align: center;
+
+      color: #64748b;
+
+      font-size: 12px;
+
+      margin-top: 15px;
+
+    }
+
+  </style>
+
+</head>
+
+
+
+<body>
+
+  <div class="card">
+
+    <h2>Log in or Sign up</h2>
+
+    <p class="sub">Choose how you want to sign in to RAGMentor</p>
+
+
+
+    <button id="google-btn" class="google">
+
+      🌐 Continue with Google
+
+    </button>
+
+
+
+    <div class="divider">OR</div>
+
+
+
+
+    <button id="email-toggle-btn" class="email-btn">
+      Continue with Email
+    </button>
+
+    <div id="email-form" class="email-form">
+      <label for="email-input">Gmail / Email address</label>
+      <input id="email-input" type="email"
+             placeholder="yourname@gmail.com" autocomplete="email">
+      <button id="send-email-otp-btn" class="email-send">Send Email OTP</button>
+      <div id="email-otp-section" class="hidden">
+        <label for="email-otp-input">Enter 6-digit Email OTP</label>
+        <input id="email-otp-input" type="text"
+               inputmode="numeric" maxlength="6" placeholder="Enter OTP">
+        <button id="verify-email-otp-btn" class="email-verify">
+          Verify Email & Continue
+        </button>
+      </div>
+    </div>
+
+    <div id="status" class="status"></div>
+
+
+
+    <p class="small">
+
+      Secure sign-in · Google powered by Firebase · Email OTP powered by SMTP.
+
+    </p>
+
+  </div>
+
+
+
+  <script type="module">
+
+    import { initializeApp }
+
+      from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+
+
+
+    import {
+
+      getAuth,
+
+      GoogleAuthProvider,
+
+      signInWithPopup,
+
+
+      setPersistence,
+
+      inMemoryPersistence,
+
+      signOut
+
+    } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+
+
+    // Streamlit component communication without external library
+
+    function sendToStreamlit(type, extra = {}) {
+
+      window.parent.postMessage({
+
+        isStreamlitMessage: true,
+
+        type,
+
+        ...extra
+
+      }, "*");
+
+    }
+
+
+
+    function setComponentReady() {
+
+      sendToStreamlit("streamlit:componentReady", {
+
+        apiVersion: 1
+
+      });
+
+    }
+
+
+
+    function setComponentValue(value) {
+
+      sendToStreamlit("streamlit:setComponentValue", {
+
+        value,
+
+        dataType: "json"
+
+      });
+
+    }
+
+
+
+    function setFrameHeight(height) {
+
+      sendToStreamlit("streamlit:setFrameHeight", {
+
+        height
+
+      });
+
+    }
+
+
+
+    const $ = id => document.getElementById(id);
+
+
+
+    let app = null;
+
+    let auth = null;
+
+    let lastLogoutVersion = null;
+
+    let busy = false;
+
+
+
+    function showStatus(message, type = "") {
+
+      $("status").textContent = message || "";
+
+      $("status").className = "status " + type;
+
+    }
+
+
+
+    function setBusy(value) {
+
+      busy = value;
+
+
+
+      [
+        "google-btn",
+        "email-toggle-btn",
+        "send-email-otp-btn",
+        "verify-email-otp-btn"
+      ].forEach(id => {
+        const element = $(id);
+        if (element) element.disabled = value;
+      });
+
+    }
+
+
+
+    async function publishUser(user, provider) {
+
+      const idToken = await user.getIdToken(true);
+
+
+
+      setComponentValue({
+
+        idToken: idToken,
+
+        provider: provider,
+
+        uid: user.uid,
+
+        email: user.email || null,
+
+
+        displayName: user.displayName || null
+
+      });
+
+
+
+      showStatus("Login successful. Opening RAGMentor...", "success");
+
+    }
+
+
+
+    // Google sign-in
+
+    $("google-btn").addEventListener("click", async () => {
+
+      if (busy || !auth) return;
+
+
+
+      setBusy(true);
+
+      showStatus("Connecting to Google...");
+
+
+
+      try {
+
+        const provider = new GoogleAuthProvider();
+
+        provider.setCustomParameters({
+
+          prompt: "select_account"
+
+        });
+
+
+
+        const result = await signInWithPopup(auth, provider);
+
+
+
+        await publishUser(result.user, "google");
+
+
+
+      } catch (error) {
+
+        showStatus(error.message, "error");
+
+      } finally {
+
+        setBusy(false);
+
+      }
+
+    });
+
+
+
+    // Email OTP is processed securely by the Streamlit server.
+    $("email-toggle-btn").addEventListener("click", () => {
+      $("email-form").classList.toggle("visible");
+      setFrameHeight(document.documentElement.scrollHeight + 20);
+    });
+
+    $("send-email-otp-btn").addEventListener("click", () => {
+      if (busy) return;
+      const email = $("email-input").value.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showStatus("Enter a valid email address.", "error");
+        return;
+      }
+      setBusy(true);
+      showStatus("Sending email OTP...");
+      setComponentValue({ action: "send_email_otp", email });
+    });
+
+    $("verify-email-otp-btn").addEventListener("click", () => {
+      if (busy) return;
+      const email = $("email-input").value.trim().toLowerCase();
+      const otp = $("email-otp-input").value.trim();
+      if (!/^\d{6}$/.test(otp)) {
+        showStatus("Enter the 6-digit email OTP.", "error");
+        return;
+      }
+      setBusy(true);
+      showStatus("Verifying email OTP...");
+      setComponentValue({ action: "verify_email_otp", email, otp });
+    });
+
+    // Receive Streamlit render messages
+
+    async function handleRender(args) {
+
+      try {
+
+        if (!app) {
+
+          if (!args.firebaseConfig) {
+
+            throw new Error("Firebase configuration is missing.");
+
+          }
+
+
+
+          app = initializeApp(args.firebaseConfig);
+
+          auth = getAuth(app);
+
+
+
+          await setPersistence(auth, inMemoryPersistence);
+
+        }
+
+
+
+        const emailStatus = args.emailStatus || {};
+        if (emailStatus.message) {
+          showStatus(emailStatus.message, emailStatus.type || "");
+          if (emailStatus.type === "success") {
+            $("email-otp-section").classList.remove("hidden");
+          }
+        }
+        setBusy(false);
+
+        const version = Number(args.logoutVersion || 0);
+
+
+
+        if (
+
+          lastLogoutVersion !== null &&
+
+          version !== lastLogoutVersion
+
+        ) {
+
+          await signOut(auth);
+
+          showStatus("You have been signed out.");
+
+
+
+          setComponentValue(null);
+
+        }
+
+
+
+        lastLogoutVersion = version;
+
+
+
+      } catch (error) {
+
+        showStatus(
+
+          "Firebase error: " + error.message,
+
+          "error"
+
+        );
+
+      }
+
+
+
+      setFrameHeight(document.documentElement.scrollHeight);
+
+    }
+
+
+
+    window.addEventListener("message", event => {
+
+      if (event.data && event.data.type === "streamlit:render") {
+
+        handleRender(event.data.args || {});
+
+      }
+
+    });
+
+
+
+    // Tell Streamlit that this component is ready
+
+    setComponentReady();
+
+
+
+    setFrameHeight(document.documentElement.scrollHeight);
+
+  </script>
+
+</body>
+
+</html>

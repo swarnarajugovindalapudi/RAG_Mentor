@@ -9,3 +9,4 @@ sentence-transformers
 huggingface-hub
 python-dotenv
 speechRecognition
+google-genai
